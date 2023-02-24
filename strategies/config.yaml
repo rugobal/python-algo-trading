@@ -1,0 +1,21 @@
+ic_es:
+  call_delta: 0.25
+  call_wing_width: 50
+  put_delta: -0.25
+  put_wing_width: 50
+  target: 0.25
+  stop: 0.60
+
+ici_es:
+  call_delta: 0.45
+  call_wing_width: 50
+  put_delta: -0.40
+  put_wing_width: 50
+  target: 4
+  stop: 10
+
+doble_cal_VM_es:
+  call_delta: 0.20
+  put_delta: -0.20
+  target: 0.20
+  stop: 0.50
