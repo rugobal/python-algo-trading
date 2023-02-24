@@ -1,92 +1,82 @@
-from datetime import datetime
+from datetime import datetime as dt
 from ib_insync import *
 import pandas as pd
 import math
 import sys
 from typing import List, Any, Dict, Tuple
 
-from datetime import datetime, time
+import os
+import yaml
+
 
 import util.bag as bagUtils
 import util.es_future as esUtils
 import util.options as optionUtils
+import util.config as config
+import util.ib as ibUtils
 
+# Read config
+config: Dict[str, Any] = config.get_config("ici_es")
+print(config)
+    
 # TWs 7497, IBGW 4001
-ib: IB = IB().connect('winhost',  7496, clientId=123, timeout=15)
+ib: IB = IB().connect('winhost',  7497, clientId=123, timeout=15)
 
 es = Future('ES', '202303', 'CME')
-print(ib.qualifyContracts(es))
+ib.qualifyContracts(es)
 
 ib.reqMarketDataType(1)
 
-trading_cls = esUtils.get_0DTE_trading_class()
 expiration = esUtils.get_0DTE_expiration()
-print('expiration: ', expiration)
+trading_cls = esUtils.get_0DTE_trading_class()
+print('expiration:', expiration)
+print('trading_class:', trading_cls)
 
-call_ticker = esUtils.get_call_ticker(ib, es, expiration, 0.45)
+## Define the strikes
+call_ticker = esUtils.get_call_ticker(ib, es, expiration, config['call_delta'])
 print('call strike selected:', call_ticker.contract.strike, 'delta:', call_ticker.lastGreeks.delta)
 
-put_ticker = esUtils.get_put_ticker(ib, es, expiration, -0.40)
+put_ticker = esUtils.get_put_ticker(ib, es, expiration, config['put_delta'])
 print('put strike selected:', put_ticker.contract.strike, 'delta:', put_ticker.lastGreeks.delta)
 
-##############################################
-#### STRIKES AND PRICE #######################
+buy_call_strike = call_ticker.contract.strike 
+sell_call_strike = buy_call_strike + config['call_wing_width']
+buy_put_strike = put_ticker.contract.strike
+sell_put_strike = buy_put_strike - config['put_wing_width']
 
-call_strike = call_ticker.contract.strike 
-call_width = +30
-
-put_strike = put_ticker.contract.strike 
-put_width = -40
-
-target = 4
-stop = 8
-
-##############################################
-##############################################
-
+## Create the ticker
 contracts = [
-    FuturesOption(es.symbol, expiration, call_strike, 'C', 'CME', '50', 'USD', tradingClass=trading_cls),
-    FuturesOption(es.symbol, expiration, call_strike+call_width, 'C', 'CME', '50', 'USD', tradingClass=trading_cls),
-    FuturesOption(es.symbol, expiration, put_strike, 'P', 'CME', '50', 'USD', tradingClass=trading_cls),
-    FuturesOption(es.symbol, expiration, put_strike+put_width, 'P', 'CME', '50', 'USD', tradingClass=trading_cls)]
+    FuturesOption(es.symbol, expiration, buy_call_strike, 'C', 'CME', '50', 'USD', tradingClass=trading_cls),
+    FuturesOption(es.symbol, expiration, sell_call_strike, 'C', 'CME', '50', 'USD', tradingClass=trading_cls),
+    FuturesOption(es.symbol, expiration, buy_put_strike, 'P', 'CME', '50', 'USD', tradingClass=trading_cls),
+    FuturesOption(es.symbol, expiration, sell_put_strike, 'P', 'CME', '50', 'USD', tradingClass=trading_cls)]
 
 ici_contract = optionUtils.create_ici(ib, contracts)
 ici_ticker = bagUtils.get_ticker(ib, ici_contract)
 
-# print('ic_ticker', ticker)
-
+# Define prices for orders
 print('ICI market price:', ici_ticker.marketPrice())
-price = esUtils.round_2tick(ici_ticker.marketPrice()) - 0.5
-limit = esUtils.round_2tick(price + target)
-stop = esUtils.round_2tick(price - stop)
+price = esUtils.round_2tick(ici_ticker.marketPrice()) - 0.25
+limit = esUtils.round_2tick(price + config['target'])
+stop = esUtils.round_2tick(price - config['stop'])
 
 print('price:', price)
 print('limit:', limit)
 print('stop:', stop)
 
-# Next, try a bracket order.
-bracket_order = ib.bracketOrder('BUY', 3, price, limit, stop)
+# Enter the orders
+bracket_order = ib.bracketOrder('BUY', 1, price, limit, stop)
 mainOrder: Trade = ib.placeOrder(ici_contract, bracket_order[0])
 takeProfitOrder = ib.placeOrder(ici_contract, bracket_order[1])
 stopLossOrder = ib.placeOrder(ici_contract, bracket_order[2])
+print(f'mainOrder id: {mainOrder.order.orderId}')
+print(f'takeProfitOrder id: {takeProfitOrder.order.orderId}')
+print(f'stopLossOrder id: {stopLossOrder.order.orderId}')
 
-print('order sent')
+print('Order sent')
 
-# define a function to handle the order status event
-def onOrderStatus(trade, order, status, filled, remaining, avgFillPrice, permId, parentId, lastFillPrice, clientId, whyHeld):
-    # check if the take profit or stop loss order has been filled
-    if order.orderId == takeProfitOrder.order.orderId or order.orderId == stopLossOrder.order.orderId:
-        print(f"The {order.action} order has been filled.")
-        # disconnect from TWS/IB Gateway
-        ib.disconnect()
-    
-
-
-# register the order status event handler
-ib.orderStatusEvent += onOrderStatus
+# exit after take profit or stop loss
+ibUtils.disconnect_after_tp_or_sl(ib, takeProfitOrder, stopLossOrder)
 
 # wait for the orders to fill
 util.run()
-
-ib.disconnect()
-

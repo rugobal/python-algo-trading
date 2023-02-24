@@ -22,13 +22,13 @@ def get_0DTE_expiration() -> str:
     return get_expiration(0)
 
 def get_expiration(daysdelta: int) -> str:
-    dt: datetime = datetime.now() + timedelta(days=daysdelta)
+    dt: datetime = datetime.today() + timedelta(days=daysdelta)
     # format the date in the format 'YYYYMMDD'
     return dt.strftime('%Y%m%d')
 
 
 def get_DTE_trading_class(dte: int):
-    dt: datetime = datetime.now() + timedelta(days=dte)
+    dt: datetime = datetime.today() + timedelta(days=dte)
     
     week = __f2(dt.day)
     day = dt.weekday()
@@ -67,21 +67,34 @@ def get_ticker(ib: IB, contract: Future, expiration: str, delta: float, write: s
     if (write == 'C'):
         strikes = [strike for strike in chain.strikes
             if strike % 5 == 0
-            and price - 5 < strike < price + 30]
+            and price - 5 < strike < price + 90]
     else:
         strikes = [strike for strike in chain.strikes
             if strike % 5 == 0
-            and price - 30 < strike < price + 5]
+            and price - 90 < strike < price + 5]
     
     ## Select call strike
     contracts = [FuturesOption(contract.symbol, expiration, strike, write, 'CME', '50', 'USD', tradingClass=trading_cls) for strike in strikes]
     contracts = ib.qualifyContracts(*contracts)
     tickers = ib.reqTickers(*contracts)
-    tickers = list(filter(lambda t: abs(t.lastGreeks.delta) >= 0.01, tickers))
+    tickers = list(filter(lambda t: abs(get_ticker_delta(t)) >= 0.01, tickers))
 
-    deltas = [t.lastGreeks.delta for t in tickers]
+    deltas = [get_ticker_delta(t) for t in tickers]
+    # print(deltas)
     return tickers[__get_delta_index(deltas, delta)]
     
+    
+def get_ticker_delta(t: Ticker) -> float:
+    if (t.lastGreeks and t.lastGreeks.delta):
+        return t.lastGreeks.delta
+    elif t.askGreeks and t.bidGreeks:
+        return (t.askGreeks.delta + t.bidGreeks.delta)/2.0    
+    elif t.modelGreeks:
+        return t.modelGreeks.delta
+    else:
+        print('this ticker has no greek?')
+        print(t)
+        return None
     
 def __get_delta_index(deltas: List[float], reference: float) -> int:
     ''' reference: the reference delta

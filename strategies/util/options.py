@@ -34,6 +34,20 @@ def create_ic(ib: IB, contracts: List[Contract]) -> Contract:
 
     return contract
 
+def create_double_cal(ib: IB, contracts: List[Contract]) -> Contract:
+    
+    ib.qualifyContracts(*contracts)
+    contract = Contract(symbol=contracts[0].symbol, secType='BAG', exchange='SMART', currency='USD')
+    
+    leg1 = ComboLeg(conId=contracts[0].conId, ratio=1, action='SELL', exchange=contracts[0].exchange)
+    leg2 = ComboLeg(conId=contracts[1].conId, ratio=1, action='BUY', exchange=contracts[1].exchange)
+    leg3 = ComboLeg(conId=contracts[2].conId, ratio=1, action='SELL', exchange=contracts[2].exchange)
+    leg4 = ComboLeg(conId=contracts[3].conId, ratio=1, action='BUY', exchange=contracts[3].exchange)
+    
+    contract.comboLegs = [leg1, leg2, leg3, leg4]
+
+    return contract
+
 
 def create_ici(ib: IB, contracts: List[Contract]) -> Contract:
     
